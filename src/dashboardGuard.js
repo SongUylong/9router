@@ -6,6 +6,7 @@ import { hasTrustedPeerHeaders } from "@/lib/auth/trustedPeer";
 
 const CLI_TOKEN_HEADER = "x-9r-cli-token";
 const CLI_TOKEN_SALT = "9r-cli-auth";
+const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 let cachedCliToken = null;
 async function getCliToken() {
@@ -206,6 +207,16 @@ export const __test__ = {
 
 export async function proxy(request) {
   const { pathname } = request.nextUrl;
+
+  if (
+    pathname.startsWith("/api/") &&
+    !isPublicApi(pathname) &&
+    MUTATING_METHODS.has(request.method) &&
+    request.headers.has("sec-fetch-site") &&
+    request.headers.get("sec-fetch-site") !== "same-origin"
+  ) {
+    return NextResponse.json({ error: "Cross-origin request blocked" }, { status: 403 });
+  }
 
   // Local-only gate for spawn-capable / host-secret routes.
   if (LOCAL_ONLY_PATHS.some((p) => pathname.startsWith(p))) {

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getSettings } from "@/lib/localDb";
 import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
-import { setDashboardAuthCookie } from "@/lib/auth/dashboardSession";
+import { setDashboardAuthCookie, shouldUseSecureCookie } from "@/lib/auth/dashboardSession";
 import { isOidcConfigured } from "@/lib/auth/oidc";
 import { isSamlConfigured } from "@/lib/auth/saml.js";
 import { checkLock, recordFail, recordSuccess, getClientIp } from "@/lib/auth/loginLimiter";
@@ -87,8 +87,13 @@ export async function POST(request) {
         );
       }
 
+      const embeddedLogin = request.headers.get("x-9router-embedded") === "1";
+      if (embeddedLogin && !shouldUseSecureCookie(request)) {
+        return NextResponse.json({ error: "Embedded sign-in requires HTTPS." }, { status: 400, headers: NO_STORE_HEADERS });
+      }
+
       const cookieStore = await cookies();
-      await setDashboardAuthCookie(cookieStore, request);
+      await setDashboardAuthCookie(cookieStore, request, {}, { embedded: embeddedLogin });
 
       return NextResponse.json({ success: true, mustChangePassword: false }, { headers: NO_STORE_HEADERS });
     }

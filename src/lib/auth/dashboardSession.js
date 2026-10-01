@@ -58,15 +58,21 @@ export async function getDashboardAuthSession(token) {
   }
 }
 
-export async function setDashboardAuthCookie(cookieStore, request, claims = {}) {
-  const token = await createDashboardAuthToken(claims);
-  cookieStore.set("auth_token", token, {
+export function getDashboardAuthCookieOptions(request, { embedded = false } = {}) {
+  const secure = shouldUseSecureCookie(request);
+  if (embedded && !secure) throw new Error("Embedded sign-in requires HTTPS.");
+  return {
     httpOnly: true,
-    secure: shouldUseSecureCookie(request),
-    sameSite: "lax",
+    secure,
+    sameSite: embedded ? "none" : "lax",
     path: "/",
     maxAge: SESSION_MAX_AGE_SEC,
-  });
+  };
+}
+
+export async function setDashboardAuthCookie(cookieStore, request, claims = {}, options = {}) {
+  const token = await createDashboardAuthToken(claims);
+  cookieStore.set("auth_token", token, getDashboardAuthCookieOptions(request, options));
 }
 
 export function clearDashboardAuthCookie(cookieStore) {

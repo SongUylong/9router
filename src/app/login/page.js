@@ -18,6 +18,10 @@ export default function LoginPage() {
   const [samlLoginLabel, setSamlLoginLabel] = useState("Sign in with SAML SSO");
   const [mustChange, setMustChange] = useState(false);
   const [newPassword, setNewPassword] = useState("");
+  const [isEmbedded] = useState(() => typeof window !== "undefined" && window.self !== window.top);
+  const [storageAccess, setStorageAccess] = useState(() =>
+    isEmbedded ? (typeof document.hasStorageAccess === "function" ? "checking" : "unsupported") : "available"
+  );
 
   // Countdown for rate-limit
   useEffect(() => {
@@ -25,6 +29,13 @@ export default function LoginPage() {
     const id = setInterval(() => setRetryAfter((s) => (s > 0 ? s - 1 : 0)), 1000);
     return () => clearInterval(id);
   }, [retryAfter]);
+
+  useEffect(() => {
+    if (!isEmbedded || typeof document.hasStorageAccess !== "function") return;
+    document.hasStorageAccess()
+      .then((hasAccess) => setStorageAccess(hasAccess ? "available" : "required"))
+      .catch(() => setStorageAccess("required"));
+  }, [isEmbedded]);
 
   useEffect(() => {
     async function checkAuth() {
@@ -63,8 +74,27 @@ export default function LoginPage() {
     checkAuth();
   }, []);
 
+  const handleEnableEmbeddedSignIn = async () => {
+    setError("");
+    if (typeof document.requestStorageAccess !== "function") {
+      setStorageAccess("unsupported");
+      setError("This browser does not support embedded sign-in storage access.");
+      return;
+    }
+    try {
+      await document.requestStorageAccess();
+      setStorageAccess("available");
+    } catch {
+      setError("Allow storage access for 9Router to sign in inside Workplace.");
+    }
+  };
+
   const handleLogin = async (e) => {
     e.preventDefault();
+    if (isEmbedded && storageAccess === "required") {
+      setError("Enable embedded sign-in before logging in.");
+      return;
+    }
     setLoading(true);
     setError("");
     setResetHint("");
@@ -72,7 +102,10 @@ export default function LoginPage() {
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(isEmbedded ? { "X-9Router-Embedded": "1" } : {}),
+        },
         body: JSON.stringify({ password }),
       });
 
@@ -205,6 +238,19 @@ export default function LoginPage() {
 
             {passwordAvailable ? (
               <form onSubmit={handleLogin} className="flex flex-col gap-4">
+                {isEmbedded && storageAccess === "required" && (
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-center">
+                    <p className="mb-3 text-xs text-text-muted">Your browser keeps sign-in storage separate inside embedded pages.</p>
+                    <Button type="button" variant="primary" className="w-full" onClick={handleEnableEmbeddedSignIn}>
+                      Enable embedded sign-in
+                    </Button>
+                  </div>
+                )}
+                {isEmbedded && storageAccess === "unsupported" && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400 text-center">
+                    This browser may block sign-in in an embedded page. Allow third-party cookies for 9Router or use a browser with storage access support.
+                  </p>
+                )}
                 {isSsoEnabled && !ssoAvailable && (
                   <p className="text-xs text-amber-600 dark:text-amber-400 text-center">
                     {activeSsoType === "saml" ? "SAML SSO" : "OIDC"} login is enabled, but configuration is incomplete. Password login is still available for recovery.
@@ -255,7 +301,7 @@ export default function LoginPage() {
                 </p>
                 {hasPassword === false && (
                   <p className="text-xs text-center text-amber-600 dark:text-amber-400">
-                    Security risk: no password set. You will be asked to set one when logging in remotely.
+                    Security risk: no password set. Set a real password from the local machine before signing in remotely.
                   </p>
                 )}
               </form>

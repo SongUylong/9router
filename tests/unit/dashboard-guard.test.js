@@ -37,9 +37,10 @@ const { proxy, __test__ } = await import("../../src/dashboardGuard.js");
 
 const PEER_TOKEN = "peer-token-fixture";
 
-function request(pathname, headers = {}) {
+function request(pathname, headers = {}, method = "GET") {
   const normalizedHeaders = new Headers(headers);
   return {
+    method,
     nextUrl: { pathname, searchParams: new URL(`http://localhost${pathname}`).searchParams },
     headers: normalizedHeaders,
     cookies: { get: vi.fn(() => undefined) },
@@ -213,6 +214,50 @@ describe("dashboard guard public LLM API access", () => {
 
     expect(response).toBe(mocks.nextResponse);
     expect(mocks.validateApiKey).toHaveBeenCalledWith("sk-valid");
+  });
+});
+
+describe("dashboard guard embedded authentication CSRF protection", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.NINEROUTER_PEER_TOKEN = PEER_TOKEN;
+    mocks.getSettings.mockResolvedValue({ requireLogin: true });
+    mocks.validateApiKey.mockResolvedValue(false);
+    mocks.getConsistentMachineId.mockResolvedValue("cli-token");
+    mocks.verifyDashboardAuthToken.mockResolvedValue(true);
+  });
+
+  it("blocks cross-site mutations to authenticated dashboard APIs", async () => {
+    const response = await proxy(request("/api/settings", { "sec-fetch-site": "cross-site" }, "PATCH"));
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe("Cross-origin request blocked");
+    expect(mocks.verifyDashboardAuthToken).not.toHaveBeenCalled();
+  });
+
+  it("blocks same-site mutations from a different origin", async () => {
+    const response = await proxy(request("/api/settings", { "sec-fetch-site": "same-site" }, "PATCH"));
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe("Cross-origin request blocked");
+  });
+
+  it("allows same-origin mutations from the embedded dashboard", async () => {
+    const response = await proxy(request("/api/settings", { "sec-fetch-site": "same-origin" }, "PATCH"));
+
+    expect(response).toBe(mocks.nextResponse);
+  });
+
+  it("allows non-browser mutations without fetch metadata", async () => {
+    const response = await proxy(request("/api/settings", {}, "PATCH"));
+
+    expect(response).toBe(mocks.nextResponse);
+  });
+
+  it("keeps cross-site SAML callbacks public", async () => {
+    const response = await proxy(request("/api/auth/saml/acs", { "sec-fetch-site": "cross-site" }, "POST"));
+
+    expect(response).toBe(mocks.nextResponse);
   });
 });
 
