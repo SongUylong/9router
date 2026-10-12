@@ -2,6 +2,9 @@ name: Workplace package
 run-name: 9router-${{ inputs.request_id }}
 
 on:
+  push:
+    branches: [fix/iframe-dashboard-auth]
+    paths: [.github/workflows/workplace-package.yml]
   workflow_dispatch:
     inputs:
       request_id:
@@ -18,7 +21,14 @@ permissions:
   contents: read
 
 jobs:
+  register:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - run: printf '%s\n' 'Register manual packaging workflow; no build or deployment.'
   package:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
