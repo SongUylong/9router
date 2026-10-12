@@ -80,10 +80,11 @@ jobs:
         run: npm run build
 
       - name: Pack without lifecycle scripts
+        working-directory: cli
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/workplace-package"
-          npm --prefix cli pack --ignore-scripts --pack-destination "$RUNNER_TEMP/workplace-package"
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/workplace-package"
 
       - name: Verify archive and write manifest
         env:
