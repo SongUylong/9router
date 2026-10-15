@@ -3,7 +3,7 @@ import { resolveConnectionProxyConfig, pickProxyPoolId } from "@/lib/network/con
 import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil } from "open-sse/services/accountFallback.js";
 import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
 import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.js";
-import { getAntigravityQuotaCache, getAntigravityModelQuota } from "./antigravityQuota.js";
+import { getAntigravityQuotaCache, getAntigravityModelQuota, refreshAntigravityQuota } from "./antigravityQuota.js";
 import * as log from "../utils/logger.js";
 
 // Mutex to prevent race conditions during account selection
@@ -194,6 +194,50 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
           consecutiveUseCount: 1
         });
       }
+    } else if (strategy === "high-quota-gemini-weekly" || strategy === "highest-quota") {
+      const quotaCache = getAntigravityQuotaCache();
+      const unpopulated = availableConnections.filter((c) => !quotaCache.has(c.id));
+      if (unpopulated.length > 0) {
+        await Promise.all(
+          unpopulated.map((c) => refreshAntigravityQuota(c.id, c.accessToken, c.providerSpecificData).catch(() => null))
+        );
+      }
+      // Non-blocking background refresh for accounts older than 30s
+      availableConnections.forEach((c) => {
+        refreshAntigravityQuota(c.id, c.accessToken, c.providerSpecificData).catch(() => null);
+      });
+
+      const getWeeklyPercentage = (conn) => {
+        const quotas = quotaCache.get(conn.id);
+        const weekly = quotas?.gemini_weekly;
+        if (weekly && typeof weekly.remainingPercentage === "number") {
+          return weekly.remainingPercentage;
+        }
+        return -1;
+      };
+
+      const sortedByWeeklyQuota = [...availableConnections].sort((a, b) => {
+        const pctA = getWeeklyPercentage(a);
+        const pctB = getWeeklyPercentage(b);
+        if (Math.abs(pctA - pctB) > 0.5) {
+          return pctB - pctA; // Highest remaining quota first
+        }
+        // Tie-breaker: least recently used
+        const timeA = a.lastUsedAt ? new Date(a.lastUsedAt).getTime() : 0;
+        const timeB = b.lastUsedAt ? new Date(b.lastUsedAt).getTime() : 0;
+        return timeA - timeB;
+      });
+
+      connection = sortedByWeeklyQuota[0];
+      const selectedPct = getWeeklyPercentage(connection);
+      log.info(
+        "AUTH",
+        `${provider} | [high-quota-gemini-weekly] selected ${connection.id?.slice(0, 8)} (${connection.name || connection.email || "unnamed"}) with ${selectedPct >= 0 ? selectedPct.toFixed(1) + "%" : "unknown"} remaining`
+      );
+
+      await updateProviderConnection(connection.id, {
+        lastUsedAt: new Date().toISOString()
+      });
     } else {
       // Default: fill-first (already sorted by priority in getProviderConnections)
       connection = availableConnections[0];

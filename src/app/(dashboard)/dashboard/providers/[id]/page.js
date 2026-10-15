@@ -1591,6 +1591,19 @@ export default function ProviderDetailPage() {
                   </div>
                 )}
               </div>
+              {providerId === "antigravity" && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-text-muted font-medium">Gemini Weekly Quota</span>
+                  <Toggle
+                    checked={providerStrategy === "high-quota-gemini-weekly"}
+                    onChange={(enabled) => {
+                      const strategy = enabled ? "high-quota-gemini-weekly" : null;
+                      setProviderStrategy(strategy);
+                      saveProviderStrategy(strategy, providerStickyLimit);
+                    }}
+                  />
+                </div>
+              )}
             </div>
           </div>
 
