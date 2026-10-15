@@ -111,12 +111,13 @@ jobs:
           TITLE="9Router Custom Build ${{ steps.pkg.outputs.release_tag }}"
           NOTES="Automated build synced with upstream master.\nIncludes custom features:\n- Gemini weekly smart quota routing\n- UI provider toggle\n- Anthropic is_error protocol compatibility"
 
-          if gh release view "$TAG" >/dev/null 2>&1; then
+          if gh release view "$TAG" -R SongUylong/9router >/dev/null 2>&1; then
             echo "Release $TAG exists. Uploading tarball..."
-            gh release upload "$TAG" "$TARBALL_PATH" --clobber
+            gh release upload "$TAG" "$TARBALL_PATH" -R SongUylong/9router --clobber
           else
             echo "Creating release $TAG..."
             gh release create "$TAG" "$TARBALL_PATH" \
+              -R SongUylong/9router \
               --title "$TITLE" \
               --notes "$NOTES" \
               --latest=true
