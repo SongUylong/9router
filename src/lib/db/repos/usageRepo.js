@@ -11,6 +11,18 @@ function maskApiKey(key) {
   return trimmed.slice(0, 8) + "***" + trimmed.slice(-4);
 }
 
+function maskAccount(str) {
+  if (!str || typeof str !== "string") return "";
+  const trimmed = str.trim();
+  if (trimmed.includes("@")) {
+    const parts = trimmed.split("@");
+    const user = parts[0];
+    const prefix = user.slice(0, 6);
+    return `${prefix}...`;
+  }
+  return trimmed.length > 8 ? `${trimmed.slice(0, 6)}...` : trimmed;
+}
+
 const PENDING_TIMEOUT_MS = 60 * 1000;
 const RING_CAP = 50;
 const CONN_CACHE_TTL_MS = 30 * 1000;
@@ -219,8 +231,10 @@ export async function getActiveRequests() {
     .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
     .map((e) => {
       const t = e.tokens || {};
+      const rawAccount = e.connectionId ? (connectionMap[e.connectionId] || e.connectionId) : "";
       return {
         timestamp: e.timestamp, model: e.model, provider: e.provider || "",
+        account: maskAccount(rawAccount),
         promptTokens: t.prompt_tokens || t.input_tokens || 0,
         completionTokens: t.completion_tokens || t.output_tokens || 0,
         status: e.status || "ok",
@@ -373,13 +387,15 @@ export async function getUsageStats(period = "all") {
   }
 
   // recentRequests from live history (last 100 entries enough for 20 deduped)
-  const recentRows = db.all(`SELECT timestamp, provider, model, tokens, status FROM usageHistory ORDER BY id DESC LIMIT 100`);
+  const recentRows = db.all(`SELECT timestamp, provider, model, connectionId, tokens, status FROM usageHistory ORDER BY id DESC LIMIT 100`);
   const seen = new Set();
   const recentRequests = recentRows
     .map((r) => {
       const t = parseJson(r.tokens, {}) || {};
+      const rawAccount = r.connectionId ? (connectionMap[r.connectionId] || r.connectionId) : "";
       return {
         timestamp: r.timestamp, model: r.model, provider: r.provider || "",
+        account: maskAccount(rawAccount),
         promptTokens: t.prompt_tokens || t.input_tokens || 0,
         completionTokens: t.completion_tokens || t.output_tokens || 0,
         cachedTokens: t.cached_tokens || t.cache_read_input_tokens || 0,
