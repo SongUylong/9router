@@ -1,0 +1,123 @@
+name: Auto-Sync Upstream, Build & Release
+
+on:
+  schedule:
+    # Run every 6 hours
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: "Force rebuild even if no new upstream commits"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  check-and-build:
+    name: Sync Upstream & Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Check upstream changes
+        id: sync
+        run: |
+          git remote add upstream https://github.com/decolua/9router.git || true
+          git fetch upstream master --tags
+
+          UPSTREAM_HEAD=$(git rev-parse upstream/master)
+          LOCAL_HEAD=$(git rev-parse HEAD)
+          BASE=$(git merge-base HEAD upstream/master)
+
+          echo "Upstream HEAD: $UPSTREAM_HEAD"
+          echo "Local HEAD:    $LOCAL_HEAD"
+          echo "Merge Base:    $BASE"
+
+          if [ "$BASE" != "$UPSTREAM_HEAD" ] || [ "${{ inputs.force_build }}" = "true" ]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "No upstream changes detected."
+          fi
+
+      - name: Merge upstream master
+        if: steps.sync.outputs.has_changes == 'true'
+        run: |
+          git merge upstream/master -m "chore: auto-sync with upstream master" --no-edit
+          git push origin master
+
+      - name: Set up Node.js
+        if: steps.sync.outputs.has_changes == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Read package version
+        if: steps.sync.outputs.has_changes == 'true'
+        id: pkg
+        run: |
+          VERSION=$(node -p "require('./cli/package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "release_tag=v${VERSION}-custom" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        if: steps.sync.outputs.has_changes == 'true'
+        run: |
+          npm install
+          npm --prefix cli install
+
+      - name: Build CLI standalone bundle
+        if: steps.sync.outputs.has_changes == 'true'
+        run: |
+          npm --prefix cli run build
+
+      - name: Pack release tarball
+        if: steps.sync.outputs.has_changes == 'true'
+        id: pack
+        run: |
+          cd cli
+          TARBALL=$(npm pack)
+          echo "tarball_name=$TARBALL" >> "$GITHUB_OUTPUT"
+          echo "tarball_path=cli/$TARBALL" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        if: steps.sync.outputs.has_changes == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pack.outputs.tarball_name }}
+          path: ${{ steps.pack.outputs.tarball_path }}
+
+      - name: Create or update GitHub Release
+        if: steps.sync.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.pkg.outputs.release_tag }}"
+          TARBALL_PATH="${{ steps.pack.outputs.tarball_path }}"
+          TITLE="9Router Custom Build ${{ steps.pkg.outputs.release_tag }}"
+          NOTES="Automated build synced with upstream master.\nIncludes custom features:\n- Gemini weekly smart quota routing\n- UI provider toggle\n- Anthropic is_error protocol compatibility"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists. Uploading tarball..."
+            gh release upload "$TAG" "$TARBALL_PATH" --clobber
+          else
+            echo "Creating release $TAG..."
+            gh release create "$TAG" "$TARBALL_PATH" \
+              --title "$TITLE" \
+              --notes "$NOTES" \
+              --latest=true
+          fi
