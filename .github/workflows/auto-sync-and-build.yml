@@ -122,3 +122,19 @@ jobs:
               --notes "$NOTES" \
               --latest=true
           fi
+
+      - name: Trigger Homelab Auto-Deploy
+        if: steps.sync.outputs.has_changes == 'true'
+        env:
+          DEPLOY_SECRET: ${{ secrets.DEPLOY_SECRET }}
+          RELEASE_TAG: ${{ steps.pkg.outputs.release_tag }}
+        run: |
+          if [ -n "$DEPLOY_SECRET" ]; then
+            echo "Notifying homelab webhook for auto-deploy..."
+            curl -sS -X POST https://deploy-9router.uylonglab.xyz/webhook \
+              -H "X-Deploy-Secret: $DEPLOY_SECRET" \
+              -H "Content-Type: application/json" \
+              -d "{\"tag\": \"$RELEASE_TAG\"}" || true
+          else
+            echo "DEPLOY_SECRET not configured, skipping auto-deploy webhook."
+          fi
