@@ -53,9 +53,7 @@ async function getLatestVersionCached() {
 }
 
 export async function GET() {
-  const latestVersion = await getLatestVersionCached();
   const currentVersion = pkg.version;
-  const hasUpdate = latestVersion ? compareVersions(latestVersion, currentVersion) > 0 : false;
-
-  return Response.json({ currentVersion, latestVersion, hasUpdate });
+  // In custom fork mode, upstream npm update banner is disabled
+  return Response.json({ currentVersion, latestVersion: currentVersion, hasUpdate: false });
 }
